@@ -1,3 +1,10 @@
+singularity-container (2.2-1~bpo8+1) jessie-backports; urgency=medium
+
+  * Rebuild for jessie-backports.
+  * Add myself to backports uploaders.
+
+ -- Afif Elghraoui <afif@debian.org>  Sun, 15 Jan 2017 23:23:26 -0800
+
 singularity-container (2.2-1) unstable; urgency=medium
 
   [ Mehdi Dogguy ]

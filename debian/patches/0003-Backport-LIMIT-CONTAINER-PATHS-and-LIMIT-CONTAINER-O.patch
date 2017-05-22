@@ -1,0 +1,317 @@
+From b75bdb425f65a8c870c79ce3921b080a43007c9c Mon Sep 17 00:00:00 2001
+From: Mehdi Dogguy <mehdi.dogguy@edf.fr>
+Date: Mon, 22 May 2017 09:22:31 +0200
+Subject: [PATCH] Backport LIMIT CONTAINER PATHS and LIMIT CONTAINER OWNERS
+ features
+
+---
+ etc/singularity.conf |  16 +++++
+ src/lib/Makefile.am  |   4 +-
+ src/lib/open.c       | 168 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ src/lib/open.h       |  26 ++++++++
+ src/sexec.c          |   7 +++
+ src/util/util.c      |   7 +++
+ src/util/util.h      |   1 +
+ 7 files changed, 227 insertions(+), 2 deletions(-)
+ create mode 100644 src/lib/open.c
+ create mode 100644 src/lib/open.h
+
+Index: singularity-container/etc/singularity.conf
+===================================================================
+--- singularity-container.orig/etc/singularity.conf
++++ singularity-container/etc/singularity.conf
+@@ -140,3 +140,19 @@ container dir = /var/lib/singularity/mnt
+ # better option.
+ #sessiondir prefix = /var/lib/singularity/sessions/
+ 
++# LIMIT CONTAINER OWNERS: [STRING]
++# DEFAULT: Undefined
++# Only allow containers to be used that are owned by a given user. If this
++# configuration is undefined (commented or set to NULL), all containers are
++# allowed to be used. This feature only applies when Singularity is running in
++# SUID mode and the user is non-root.
++#limit container owners = gmk, singularity, nobody
++
++# LIMIT CONTAINER PATHS: [STRING]
++# DEFAULT: Undefined
++# Only allow containers to be used that are located within an allowed path
++# prefix. If this configuration is undefined (commented or set to NULL),
++# containers will be allowed to run from anywhere on the file system. This
++# feature only applies when Singularity is running in SUID mode and the user is
++# non-root.
++#limit container paths = /scratch, /tmp, /global
+Index: singularity-container/src/lib/Makefile.am
+===================================================================
+--- singularity-container.orig/src/lib/Makefile.am
++++ singularity-container/src/lib/Makefile.am
+@@ -11,9 +11,9 @@ include_HEADERS = singularity.h
+ lib_LTLIBRARIES = libsingularity.la
+ 
+ libsingularity_la_LIBADD = ns/libns.la rootfs/librootfs.la action/libaction.la mount/libmount.la file/libfile.la
+-libsingularity_la_SOURCES = singularity.c privilege.c message.c util.c file.c sessiondir.c config_parser.c fork.c loop-control.c image-util.c
++libsingularity_la_SOURCES = singularity.c privilege.c message.c util.c file.c sessiondir.c config_parser.c fork.c loop-control.c image-util.c open.c
+ libsingularity_la_LDFLAGS = -version-info 1:0:0 
+ libsingularity_la_CFLAGS = $(AM_CFLAGS) # This fixes duplicate sources in library and progs
+ 
+-EXTRA_DIST = config_parser.h fork.h image-util.h loop-control.h message.h privilege.h sessiondir.h singularity.h
++EXTRA_DIST = config_parser.h fork.h image-util.h loop-control.h open.h message.h privilege.h sessiondir.h singularity.h
+ 
+Index: singularity-container/src/lib/open.c
+===================================================================
+--- /dev/null
++++ singularity-container/src/lib/open.c
+@@ -0,0 +1,168 @@
++/*
++ * Copyright (c) 2015-2017, Gregory M. Kurtzer. All rights reserved.
++ *
++ * Copyright (c) 2016-2017, The Regents of the University of California,
++ * through Lawrence Berkeley National Laboratory (subject to receipt of any
++ * required approvals from the U.S. Dept. of Energy).  All rights reserved.
++ *
++ * This software is licensed under a customized 3-clause BSD license.  Please
++ * consult LICENSE file distributed with the sources of this project regarding
++ * your rights to use or distribute this software.
++ *
++ * NOTICE.  This Software was developed under funding from the U.S. Department of
++ * Energy and the U.S. Government consequently retains certain rights. As such,
++ * the U.S. Government has been granted for itself and others acting on its
++ * behalf a paid-up, nonexclusive, irrevocable, worldwide license in the Software
++ * to reproduce, distribute copies to the public, prepare derivative works, and
++ * perform publicly and display publicly, and to permit other to do so.
++ *
++*/
++
++#include <errno.h>
++#include <fcntl.h>
++#include <stdio.h>
++#include <string.h>
++#include <sys/stat.h>
++#include <sys/types.h>
++#include <limits.h>
++#include <unistd.h>
++#include <stdlib.h>
++#include <grp.h>
++#include <pwd.h>
++#include <libgen.h>
++
++#include "util/file.h"
++#include "util/util.h"
++#include "lib/config_parser.h"
++#include "lib/message.h"
++#include "lib/privilege.h"
++
++
++int singularity_image_open(char *image, int open_flags) {
++    struct stat imagestat;
++
++    singularity_config_rewind();
++    const char *limit_container_owners = singularity_config_get_value("limit container owners");
++    singularity_config_rewind();
++    const char *limit_container_paths = singularity_config_get_value("limit container paths");
++
++    if ( ( is_dir(image) == 0 ) && ( open_flags & (O_RDWR|O_WRONLY) ) ) {
++        open_flags &= ~(O_RDWR|O_WRONLY) | O_RDONLY;
++    }
++
++    int image_fd = -1;
++    singularity_message(DEBUG, "Opening file descriptor to image: %s\n", image);
++    if ( ( image_fd = open(image, open_flags, 0755) ) < 0 ) {
++        singularity_message(ERROR, "Could not open image %s: %s\n", image, strerror(errno));
++        ABORT(255);
++    }
++
++    if ( fcntl(image_fd, F_SETFD, FD_CLOEXEC) != 0 ) {
++        singularity_message(ERROR, "Could not set file descriptor flag to close on exit: %s\n", strerror(errno));
++        ABORT(255);
++    }
++
++    if ( fstat(image_fd, &imagestat) < 0 ) {
++        singularity_message(ERROR, "Failed calling fstat() on %s (fd: %d): %s\n", image, image_fd, strerror(errno));
++        ABORT(255);
++    }
++    singularity_message(VERBOSE, "Called fstat on %s (fd: %d)\n", image, image_fd);
++
++    if ( ( is_suid("/proc/self/exe") >= 0 ) && ( singularity_priv_getuid() != 0 ) ) {
++        if ( limit_container_paths != NULL ) {
++            char image_path[PATH_MAX];
++            char *path_token = NULL;
++            char *fd_path = NULL;
++
++            fd_path = (char *) malloc(PATH_MAX+21);
++
++            singularity_message(DEBUG, "Obtaining full path to image file descriptor (%d)\n", image_fd);
++
++            if ( snprintf(fd_path, PATH_MAX+20, "/proc/self/fd/%d", image_fd) > 0 ) {
++                singularity_message(DEBUG, "Checking image path from file descriptor source: %s\n", fd_path);
++            } else {
++                singularity_message(ERROR, "Internal - Failed allocating memory for fd_path string: %s\n", strerror(errno));
++                ABORT(255);
++            }
++
++            if ( readlink(fd_path, image_path, PATH_MAX-1) > 0 ) { // Flawfinder: ignore (TOCTOU not an issue within /proc)
++                char *current = strtok_r(strdup(limit_container_paths), ",", &path_token);
++
++                chomp(current);
++                while (1) {
++
++                    if ( current[0] == '\0' ) {
++                        singularity_message(DEBUG, "Skipping blank path limit entry\n");
++
++                    } else {
++                        char *current_path = trim(current);
++                        singularity_message(DEBUG, "Checking image path: '%s'\n", current_path);
++
++                        if ( strncmp(image_path, current_path, strlength(current_path, PATH_MAX)) == 0 ) {
++                            singularity_message(VERBOSE, "Singularity image is in an allowed path: %s\n", current_path);
++                            break;
++                        }
++
++                        current = strtok_r(NULL, ",", &path_token);
++
++                        if ( current == NULL ) {
++                            singularity_message(ERROR, "Singularity image is not in an allowed configured path\n");
++                            ABORT(255);
++                        } else {
++                            chomp(current);
++                        }
++                    }
++                }
++
++            } else {
++                singularity_message(ERROR, "Could not obtain the full system path of the image file: %s\n", strerror(errno));
++                ABORT(255);
++            }
++        }
++
++        if ( limit_container_owners != NULL ) {
++            struct stat image_stat;
++            char *user_token = NULL;
++            char *current = strtok_r(strdup(limit_container_owners), ",", &user_token);
++
++            chomp(current);
++
++            singularity_message(DEBUG, "Limiting container access to allowed users\n");
++
++            if ( fstat(image_fd, &image_stat) != 0 ) {
++                singularity_message(ERROR, "Could not fstat() image file descriptor (%d): %s\n", image_fd, strerror(errno));
++                ABORT(255);
++            }
++
++            while (1) {
++                struct passwd *user_pw;
++
++                if ( current[0] == '\0' ) {
++                    singularity_message(DEBUG, "Skipping blank user limit entry\n");
++
++                } else {
++                    char *current_user = trim(current);
++                    singularity_message(DEBUG, "Checking user: '%s'\n", current_user);
++
++                    if ( ( user_pw = getpwnam(current_user) ) != NULL ) {
++                        if ( user_pw->pw_uid == image_stat.st_uid ) {
++                            singularity_message(DEBUG, "Singularity image is owned by required user: %s\n", current_user);
++                            break;
++                        }
++                    }
++                }
++
++                current = strtok_r(NULL, ",", &user_token);
++
++                if ( current == NULL ) {
++                    singularity_message(ERROR, "Singularity image is not owned by required user(s)\n");
++                    ABORT(255);
++                } else {
++                    chomp(current);
++                }
++            }
++        }
++    }
++
++    return(0);
++}
+Index: singularity-container/src/lib/open.h
+===================================================================
+--- /dev/null
++++ singularity-container/src/lib/open.h
+@@ -0,0 +1,26 @@
++/*
++ * Copyright (c) 2015-2017, Gregory M. Kurtzer. All rights reserved.
++ *
++ * Copyright (c) 2016-2017, The Regents of the University of California,
++ * through Lawrence Berkeley National Laboratory (subject to receipt of any
++ * required approvals from the U.S. Dept. of Energy).  All rights reserved.
++ *
++ * This software is licensed under a customized 3-clause BSD license.  Please
++ * consult LICENSE file distributed with the sources of this project regarding
++ * your rights to use or distribute this software.
++ *
++ * NOTICE.  This Software was developed under funding from the U.S. Department of
++ * Energy and the U.S. Government consequently retains certain rights. As such,
++ * the U.S. Government has been granted for itself and others acting on its
++ * behalf a paid-up, nonexclusive, irrevocable, worldwide license in the Software
++ * to reproduce, distribute copies to the public, prepare derivative works, and
++ * perform publicly and display publicly, and to permit other to do so.
++ *
++*/
++
++#ifndef __SINGULARITY_IMAGE_OPEN_H_
++#define __SINGULARITY_IMAGE_OPEN_H_
++
++extern int singularity_image_open(char *image, int open_flags);
++
++#endif /* __SINGULARITY_IMAGE_OPEN_H */
+Index: singularity-container/src/sexec.c
+===================================================================
+--- singularity-container.orig/src/sexec.c
++++ singularity-container/src/sexec.c
+@@ -22,6 +22,7 @@
+ #include <stdlib.h>
+ #include <unistd.h>
+ #include <sys/types.h>
++#include <fcntl.h>
+ #include <sys/wait.h>
+ #include <errno.h>
+ #include <string.h>
+@@ -112,6 +113,12 @@ int main(int argc, char **argv) {
+         singularity_abort(255, "SINGULARITY_IMAGE not defined!\n");
+     }
+ 
++    if ( envar_defined("SINGULARITY_WRITABLE") == TRUE ) {
++        singularity_image_open(image, O_RDWR);
++    } else {
++        singularity_image_open(image, O_RDONLY);
++    }
++
+     singularity_action_init();
+     singularity_rootfs_init(image);
+     singularity_sessiondir_init(image);
+Index: singularity-container/src/util/util.c
+===================================================================
+--- singularity-container.orig/src/util/util.c
++++ singularity-container/src/util/util.c
+@@ -172,6 +172,13 @@ void chomp(char *str) {
+     }
+ }
+ 
++char *trim(char *str) {
++    char *e = str + strlen(str) - 1;
++    while(*str && isspace(*str)) str++;
++    while(e > str && isspace(*e)) *e-- = '\0';
++    return str;
++}
++
+ int strlength(const char *string, int max_len) {
+     int len;
+     for (len=0; string[len] && len < max_len; len++) {
+Index: singularity-container/src/util/util.h
+===================================================================
+--- singularity-container.orig/src/util/util.h
++++ singularity-container/src/util/util.h
+@@ -37,6 +37,7 @@ char *int2str(int num);
+ char *joinpath(const char * path1, const char * path2);
+ char *strjoin(char *str1, char *str2);
+ void chomp(char *str);
++char *trim(char *str);
+ int strlength(const char *string, int max_len);
+ //char *random_string(int length);
+ 

@@ -1,3 +1,9 @@
+singularity-container (2.4-1~bpo8+1) jessie-backports; urgency=medium
+
+  * Rebuild for jessie-backports. 
+
+ -- Thomas Hamel <thomas-externe.hamel@edf.fr>  Wed, 25 Oct 2017 11:28:26 -0200
+
 singularity-container (2.4-1) experimental; urgency=medium
 
   * New upstream release

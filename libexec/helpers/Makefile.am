@@ -1,6 +1,8 @@
-scriptlibexecdir = $(libexecdir)/singularity/helpers
+SUBDIRS = apps checks
 
-dist_scriptlibexec_SCRIPTS = bootstrap.sh copy.sh image-create.sh image-expand.sh image-export.sh image-import.sh image-mount.sh
+helpersdir = $(libexecdir)/singularity/helpers
+
+dist_helpers_SCRIPTS = check.sh help.sh inspect.sh image.sh record-env.sh
 
 MAINTAINERCLEANFILES = Makefile.in
 

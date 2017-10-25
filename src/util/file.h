@@ -1,7 +1,9 @@
 /* 
- * Copyright (c) 2015-2016, Gregory M. Kurtzer. All rights reserved.
+ * Copyright (c) 2017, SingularityWare, LLC. All rights reserved.
+ *
+ * Copyright (c) 2015-2017, Gregory M. Kurtzer. All rights reserved.
  * 
- * “Singularity” Copyright (c) 2016, The Regents of the University of California,
+ * Copyright (c) 2016-2017, The Regents of the University of California,
  * through Lawrence Berkeley National Laboratory (subject to receipt of any
  * required approvals from the U.S. Dept. of Energy).  All rights reserved.
  * 
@@ -18,8 +20,14 @@
  * 
  */
 
+#ifndef __FILE_H_
+#define __FILE_H_
 
 char *file_id(char *path);
+char *file_devino(char *path);
+#include <sys/stat.h>
+int chk_perms(char *path, mode_t mode);
+int chk_mode(char *path, mode_t mode, mode_t mask);
 int is_file(char *path);
 int is_fifo(char *path);
 int is_link(char *path);
@@ -35,4 +43,7 @@ int s_rmdir(char *dir);
 int copy_file(char * source, char * dest);
 char *filecat(char *path);
 int fileput(char *path, char *string);
+int filelock(const char *const filepath, int *const fdptr);
 char *basedir(char *dir);
+
+#endif

@@ -1,7 +1,9 @@
 /* 
- * Copyright (c) 2015-2016, Gregory M. Kurtzer. All rights reserved.
+ * Copyright (c) 2017, SingularityWare, LLC. All rights reserved.
+ *
+ * Copyright (c) 2015-2017, Gregory M. Kurtzer. All rights reserved.
  * 
- * “Singularity” Copyright (c) 2016, The Regents of the University of California,
+ * Copyright (c) 2016-2017, The Regents of the University of California,
  * through Lawrence Berkeley National Laboratory (subject to receipt of any
  * required approvals from the U.S. Dept. of Energy).  All rights reserved.
  * 
@@ -37,8 +39,8 @@
 
 #include "config.h"
 #include "util/util.h"
-#include "lib/message.h"
-#include "lib/privilege.h"
+#include "util/message.h"
+#include "util/privilege.h"
 
 char *file_id(char *path) {
     struct stat filestat;
@@ -61,6 +63,61 @@ char *file_id(char *path) {
     return(ret);
 }
 
+char *file_devino(char *path) {
+    struct stat filestat;
+    char *ret;
+
+    singularity_message(DEBUG, "Called file_devino(%s)\n", path);
+
+    // Stat path
+    if (lstat(path, &filestat) < 0) {
+        return(NULL);
+    }
+
+    ret = (char *) malloc(128);
+    snprintf(ret, 128, "%d.%lu", (int)filestat.st_dev, (long unsigned)filestat.st_ino); // Flawfinder: ignore
+
+    singularity_message(DEBUG, "Returning file_devino(%s) = %s\n", path, ret);
+    return(ret);
+}
+
+int chk_perms(char *path, mode_t mode) {
+    struct stat filestat;
+
+    singularity_message(DEBUG, "Checking permissions on: %s\n", path);
+
+    // Stat path
+    if (stat(path, &filestat) < 0) {
+        return(-1);
+    }
+
+    if ( filestat.st_mode & mode ) {
+        singularity_message(WARNING, "Found appropriate permissions on file: %s\n", path);
+        return(0);
+    }
+
+    return(-1);
+}
+
+int chk_mode(char *path, mode_t mode, mode_t mask) {
+    struct stat filestat;
+
+    singularity_message(DEBUG, "Checking exact mode (%o) on: %s\n", mode, path);
+
+    // Stat path
+    if (stat(path, &filestat) < 0) {
+        return(-1);
+    }
+
+    if ( ( filestat.st_mode | mask )  == ( mode | mask ) ) {
+        singularity_message(DEBUG, "Found appropriate mode on file: %s\n", path);
+        return(0);
+    } else {
+        singularity_message(VERBOSE, "Found wrong permission on file %s: %o != %o\n", path, mode, filestat.st_mode);
+    }
+
+    return(-1);
+}
 
 int is_file(char *path) {
     struct stat filestat;
@@ -228,18 +285,22 @@ int s_mkpath(char *dir, mode_t mode) {
         return(-1);
     }
 
-    if (strlength(dir, 2) == 1 && dir[0] == '/') {
+    if (strcmp(dir, "/") == 0 ) {
+        singularity_message(DEBUG, "Directory is '/', returning '0'\n");
         return(0);
     }
 
     if ( is_dir(dir) == 0 ) {
-        // Directory already exists, stop...
+        singularity_message(DEBUG, "Directory exists, returning '0': %s\n", dir);
         return(0);
     }
 
-    if ( s_mkpath(dirname(strdupa(dir)), mode) < 0 ) {
-        // Return if priors failed
-        return(-1);
+    if ( is_dir(dirname(strdupa(dir))) < 0 ) {
+        singularity_message(DEBUG, "Creating parent directory: %s\n", dirname(strdupa(dir)));
+        if ( s_mkpath(dirname(strdupa(dir)), mode) < 0 ) {
+            singularity_message(VERBOSE, "Failed to create parent directory %s\n", dir);
+            return(-1);
+        }
     }
 
     singularity_message(DEBUG, "Creating directory: %s\n", dir);
@@ -248,7 +309,7 @@ int s_mkpath(char *dir, mode_t mode) {
     umask(mask); // Flawfinder: ignore
 
     if ( ret < 0 ) {
-        if ( is_dir(dir) < 0 ) { // It is possible that the directory was created between above check and mkdir()
+        if ( errno != EEXIST ) {
             singularity_message(DEBUG, "Opps, could not create directory %s: (%d) %s\n", dir, errno, strerror(errno));
             return(-1);
         }
@@ -258,13 +319,38 @@ int s_mkpath(char *dir, mode_t mode) {
 }
 
 int _unlink(const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf) {
-//    printf("remove(%s)\n", fpath);
-    return(remove(fpath));
+    int retval;
+
+    if ( ( retval = remove(fpath) ) < 0 ) { 
+        singularity_message(WARNING, "Failed removing file: %s\n", fpath);
+    }
+
+    return(retval);
+}
+
+int _writable(const char *fpath, const struct stat *sb, int typeflag, struct FTW *ftwbuf) {
+    int retval;
+
+    if ( is_link((char *) fpath) == 0 ) {
+        return(0);
+    }
+
+    if ( ( retval = chmod(fpath, 0700) ) < 0 ) { // Flawfinder: ignore
+        singularity_message(WARNING, "Failed changing permission of file: %s\n", fpath);
+    }
+
+    // Always return success
+    return(0);
 }
 
 int s_rmdir(char *dir) {
 
     singularity_message(DEBUG, "Removing directory: %s\n", dir);
+    if ( nftw(dir, _writable, 32, FTW_MOUNT|FTW_PHYS) < 0 ) {
+        singularity_message(ERROR, "Failed preparing directory for removal: %s\n", dir);
+        ABORT(255);
+    }
+
     return(nftw(dir, _unlink, 32, FTW_DEPTH|FTW_MOUNT|FTW_PHYS));
 }
 
@@ -277,7 +363,7 @@ int copy_file(char * source, char * dest) {
     singularity_message(DEBUG, "Called copy_file(%s, %s)\n", source, dest);
 
     if ( is_file(source) < 0 ) {
-        singularity_message(ERROR, "Could not copy from non-existant source: %s\n", source);
+        singularity_message(ERROR, "Could not copy from non-existent source: %s\n", source);
         return(-1);
     }
 
@@ -297,12 +383,16 @@ int copy_file(char * source, char * dest) {
     singularity_message(DEBUG, "Calling fstat() on source file descriptor: %d\n", fileno(fp_s));
     if ( fstat(fileno(fp_s), &filestat) < 0 ) {
         singularity_message(ERROR, "Could not fstat() on %s: %s\n", source, strerror(errno));
+        fclose(fp_s);
+        fclose(fp_d);
         return(-1);
     }
 
     singularity_message(DEBUG, "Cloning permission string of source to dest\n");
     if ( fchmod(fileno(fp_d), filestat.st_mode) < 0 ) {
         singularity_message(ERROR, "Could not set permission mode on %s: %s\n", dest, strerror(errno));
+        fclose(fp_s);
+        fclose(fp_d);
         return(-1);
     }
 
@@ -358,6 +448,7 @@ char *filecat(char *path) {
 
     if ( fseek(fd, 0L, SEEK_END) < 0 ) {
         singularity_message(ERROR, "Could not seek to end of file %s: %s\n", path, strerror(errno));
+        fclose(fd);
         return(NULL);
     }
 
@@ -378,6 +469,95 @@ char *filecat(char *path) {
     return(ret);
 }
 
+/* 
+ * Open and exclusive-lock file, creating it (-rw-------)
+ * if necessary. If fdptr is not NULL, the descriptor is
+ * saved there. The descriptor is never one of the standard
+ * descriptors STDIN_FILENO, STDOUT_FILENO, or STDERR_FILENO.
+ * If successful, the function returns 0.
+ * Otherwise, the function returns nonzero errno:
+ *     EINVAL: Invalid lock file path
+ *     EMFILE: Too many open files
+ *     EALREADY: Already locked
+ * or one of the open(2)/creat(2) errors.
+ */
+int filelock(const char *const filepath, int *const fdptr) {
+    struct flock lock;
+    int used = 0; /* Bits 0 to 2: stdin, stdout, stderr */
+    int fd;
+
+    singularity_message(DEBUG, "Called filelock(%s)\n", filepath);
+    
+    /* In case the caller is interested in the descriptor,
+     * initialize it to -1 (invalid). */
+    if (fdptr)
+        *fdptr = -1;
+
+    /* Invalid path? */
+    if (filepath == NULL || *filepath == '\0')
+        return errno = EINVAL;
+
+    /* Open the file. */
+    do {
+        fd = open(filepath, O_RDWR | O_CREAT, 0644);
+    } while (fd == -1 && errno == EINTR);
+    if (fd == -1) {
+        if (errno == EALREADY)
+            errno = EIO;
+        return errno;
+    }
+
+    /* Move fd away from the standard descriptors. */
+    while (1) {
+        if( fd == STDIN_FILENO ) {
+            used |= 1;
+            fd = dup(fd);
+        } else if ( fd == STDOUT_FILENO ) {
+            used |= 2;
+            fd = dup(fd);
+        } else if( fd == STDERR_FILENO ) {
+            used |= 4;
+            fd = dup(fd);
+        } else {
+            break;
+        }
+    }
+    
+    /* Close the standard descriptors we temporarily used. */
+    if (used & 1)
+        close(STDIN_FILENO);
+    if (used & 2)
+        close(STDOUT_FILENO);
+    if (used & 4)
+        close(STDERR_FILENO);
+
+    /* Did we run out of descriptors? */
+    if (fd == -1)
+        return errno = EMFILE;    
+
+    /* Exclusive lock, cover the entire file (regardless of size). */
+    lock.l_type = F_WRLCK;
+    lock.l_whence = SEEK_SET;
+    lock.l_start = 0;
+    lock.l_len = 0;
+    if (fcntl(fd, F_SETLK, &lock) == -1) {
+        /* Lock failed. Close file and report locking failure. */
+        close(fd);
+        return errno = EALREADY;
+    }
+
+    if ( fcntl(fd, F_SETFD, FD_CLOEXEC) != 0 ) {
+        close(fd);
+        return errno = EBADF;
+    }
+
+    /* Save descriptor, if the caller wants it. */
+    if (fdptr)
+        *fdptr = fd;
+
+    return 0;
+}
+
 
 char *basedir(char *dir) {
     char *testdir = strdup(dir);
@@ -385,7 +565,7 @@ char *basedir(char *dir) {
 
     singularity_message(DEBUG, "Obtaining basedir for: %s\n", dir);
 
-    while ( strcmp(testdir, "/") != 0 ) {
+    while ( ( strcmp(testdir, "/") != 0 ) && ( strcmp(testdir, ".") != 0 ) ) {
         singularity_message(DEBUG, "Iterating basedir: %s\n", testdir);
 
         ret = strdup(testdir);

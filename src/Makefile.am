@@ -1,56 +1,75 @@
-SUBDIRS = lib util
+SUBDIRS = lib action-lib bootstrap-lib util
 
 MAINTAINERCLEANFILES = Makefile.in config.h config.h.in
 DISTCLEANFILES = Makefile
 CLEANFILES = core.* *~ *.la
 AM_CFLAGS = -Wall -fpie -fPIC
 AM_LDFLAGS = -pie
-AM_CPPFLAGS = -DSYSCONFDIR=\"$(sysconfdir)\" -DLOCALSTATEDIR=\"$(localstatedir)\" -DLIBEXECDIR=\"$(libexecdir)\" $(SINGULARITY_DEFINES) $(NO_SETNS)
+AM_CPPFLAGS = -DBINDIR=\"$(bindir)\" -DSYSCONFDIR=\"$(sysconfdir)\" -DLOCALSTATEDIR=\"$(localstatedir)\" -DLIBEXECDIR=\"$(libexecdir)\" $(SINGULARITY_DEFINES) $(NO_SETNS)
 
-bindir = $(libexecdir)/singularity
+lexecdir = $(libexecdir)/singularity/bin
 
-bin_PROGRAMS = $(BUILD_SUID) sexec image-create image-expand image-mount image-bind get-section
-EXTRA_PROGRAMS = sexec-suid
+lexec_PROGRAMS = action builddef cleanupd get-section image-type mount prepheader start $(BUILD_SUID)
+EXTRA_PROGRAMS = action-suid mount-suid start-suid
 
-sexec_SOURCES = sexec.c util/util.c util/file.c
-sexec_LDADD = lib/libsingularity.la
+cleanupd_SOURCES = cleanupd.c util/util.c util/file.c util/message.c util/privilege.c util/config_parser.c util/registry.c
+cleanupd_CPPFLAGS = $(AM_CPPFLAGS)
 
-sexec_suid_SOURCES = sexec.c util/util.c util/file.c
-sexec_suid_LDADD = lib/libsingularity.la
-sexec_suid_LDFLAGS = -static
-sexec_suid_CPPFLAGS = -DSINGULARITY_SUID $(AM_CPPFLAGS)
+action_SOURCES = action.c util/util.c util/file.c util/registry.c util/privilege.c util/sessiondir.c util/suid.c util/cleanupd.c util/daemon.c
+action_LDADD = lib/image/libsingularity-image.la lib/runtime/libsingularity-runtime.la action-lib/libinternal.la
+action_CPPFLAGS = $(AM_CPPFLAGS)
 
-image_create_SOURCES = image-create.c util/file.c util/util.c
-image_create_LDADD = lib/libsingularity.la
+builddef_SOURCES = builddef.c util/util.c util/file.c util/registry.c util/sessiondir.c
+builddef_LDADD = lib/image/libsingularity-image.la lib/runtime/libsingularity-runtime.la bootstrap-lib/libinternal.la
+builddef_CPPFLAGS = $(AM_CPPFLAGS)
+builddef_LDFLAGS = -static
 
-image_expand_SOURCES = image-expand.c util/file.c util/util.c
-image_expand_LDADD = lib/libsingularity.la
+start_SOURCES = start.c util/util.c util/file.c util/registry.c util/privilege.c util/sessiondir.c util/suid.c util/cleanupd.c util/fork.c util/daemon.c util/signal.c
+start_LDADD = lib/image/libsingularity-image.la lib/runtime/libsingularity-runtime.la action-lib/libinternal.la
+start_CPPFLAGS = $(AM_CPPFLAGS)
 
-image_mount_SOURCES = image-mount.c util/util.c util/file.c
-image_mount_LDADD = lib/libsingularity.la
+mount_SOURCES = mount.c util/util.c util/file.c util/registry.c util/suid.c util/privilege.c
+mount_LDADD = lib/image/libsingularity-image.la lib/runtime/libsingularity-runtime.la
+mount_CPPFLAGS = $(AM_CPPFLAGS)
 
-image_bind_SOURCES = image-bind.c util/util.c util/file.c
-image_bind_LDADD = lib/libsingularity.la
+prepheader_SOURCES = prepheader.c
+prepheader_LDADD =
+prepheader_CPPFLAGS = $(AM_CPPFLAGS)
 
-get_section_SOURCES = get-section.c util/util.c util/file.c
-get_section_LDADD = lib/libsingularity.la
+get_section_SOURCES = get-section.c util/util.c util/file.c util/message.c util/privilege.c util/config_parser.c util/registry.c
+get_section_CPPFLAGS = $(AM_CPPFLAGS)
 
+image_type_SOURCES = image-type.c util/util.c util/message.c util/config_parser.c util/file.c
+image_type_LDADD = lib/image/libsingularity-image.la
+image_type_CPPFLAGS = $(AM_CPPFLAGS)
 
+action_suid_SOURCES = $(action_SOURCES)
+action_suid_LDADD = $(action_LDADD)
+action_suid_LDFLAGS = -static
+action_suid_CPPFLAGS = -DSINGULARITY_SUID $(AM_CPPFLAGS)
 
-#sexec_nosuid_CPPFLAGS = -DSINGULARITY_NOSUID=1 -DSYSCONFDIR=\"$(sysconfdir)\" -DLOCALSTATEDIR=\"$(localstatedir)\" -DLIBEXECDIR=\"$(libexecdir)\" $(SINGULARITY_DEFINES) $(NO_SETNS)
-#bootstrap_CPPFLAGS = -DLIBEXECDIR=\"$(libexecdir)\"
-#ftrace_CPPFLAGS = -DARCH_$(SINGULARITY_ARCH)
+start_suid_SOURCES = $(start_SOURCES)
+start_suid_LDADD = $(start_LDADD)
+start_suid_LDFLAGS = -static
+start_suid_CPPFLAGS = -DSINGULARITY_SUID $(AM_CPPFLAGS)
 
-#dist_suidPROGRAM_INSTALL = ${INSTALL} -m 640
+mount_suid_SOURCES = $(mount_SOURCES)
+mount_suid_LDADD = $(mount_LDADD)
+mount_suid_LDFLAGS = -static
+mount_suid_CPPFLAGS = -DSINGULARITY_SUID $(AM_CPPFLAGS)
+
 
 install-data-hook: make_suid
 
 make_suid:
-	@if test `id -ru` = "0" -a "x$(BUILD_SUID)" = "xsexec-suid"; then \
-		echo " /bin/chown root:root $(DESTDIR)$(libexecdir)/singularity/sexec-suid"; \
-		/bin/chown root:root $(DESTDIR)$(libexecdir)/singularity/sexec-suid; \
-		echo " /bin/chmod 4755 $(DESTDIR)$(libexecdir)/singularity/sexec-suid"; \
-		/bin/chmod 4755 $(DESTDIR)$(libexecdir)/singularity/sexec-suid; \
+	@if test `id -ru` = "0"; then \
+		for i in $(BUILD_SUID); do \
+			echo " /bin/chown root:root $(DESTDIR)$(libexecdir)/singularity/bin/$$i"; \
+			/bin/chown root:root $(DESTDIR)$(libexecdir)/singularity/bin/$$i ; \
+			echo " /bin/chmod 4755 $(DESTDIR)$(libexecdir)/singularity/bin/$$i"; \
+			/bin/chmod 4755 $(DESTDIR)$(libexecdir)/singularity/bin/$$i; \
+		done; \
 	fi
+
 
 EXTRA_DIST = config.h

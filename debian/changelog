@@ -1,3 +1,87 @@
+singularity-container (2.4-1) experimental; urgency=medium
+
+  * New upstream release
+    - atomic 'build' process (no need to pre-create an image)
+      - create command is deprecated in favor of image.create
+    - new default image format based on SquashFS
+    - more info: http://singularity.lbl.gov/release-2-4
+  * debian/control
+    - fixed Homepage (thanks Afif Elghraoui) (Closes: #850227)
+  * debian/patches/reproducible_build
+    - thanks tiress Chris Lamb (Closes: #866169)
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Thu, 12 Oct 2017 21:55:26 -0400
+
+singularity-container (2.3.2-1) unstable; urgency=medium
+
+  * New upstream release
+    - debian/patches/up_makedirs_cache is no longer pertinent
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Sat, 07 Oct 2017 00:15:10 -0400
+
+singularity-container (2.3.1-2) unstable; urgency=medium
+
+  * Provide version for help2man from this changelog (Closes: #871371)
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Mon, 07 Aug 2017 19:33:57 -0400
+
+singularity-container (2.3.1-1) unstable; urgency=high
+
+  * Fresh upstream minor release
+    - A potential escalation pathway was identified that could have
+    allowed a malicious user to escalate their privileges on hosts that do not
+    support the PR_SET_NO_NEW_PRIVS flag for the prctl() system call. This
+    release fixes this as well as several other identified bugs and potential
+    race conditions.
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Mon, 26 Jun 2017 16:04:51 -0700
+
+singularity-container (2.3-1) unstable; urgency=medium
+
+  * Fresh upstream minor release
+  * debian/patches -- all dropped (upstreamed)
+  * debian/copyright -- updated copyright holders/years
+  * debian/rules
+    - a few path tune ups for permissions tuning as introduced upstream
+    - apparently still uses /var as default for localstatedir, so specified
+      /var/lib explicitly
+    - export SINGULARITY_CACHEDIR env var to instruct singularity
+      to not attempt create cachedir somewhere under /nonexistent path
+      Also added a patch to not fail to create that cache directory if 
+      parent doesn't exist
+  * debian/control
+    - Python to build-depends
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Fri, 02 Jun 2017 22:56:30 -0400
+
+singularity-container (2.2.1-1) experimental; urgency=medium
+
+  * Fresh upstream bugfix release (includes all included in 2.2-2 changesets,
+    which are dropped now here)
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Wed, 15 Feb 2017 10:42:39 -0500
+
+singularity-container (2.2-2) unstable; urgency=high
+
+  * debian/patches - picks up from upcoming 2.2.1 release
+    critical functionality and possibly security-related fixes
+    - changeset_b859cd8b4b9293f2a8a893ef41c5d93a5318dd6c.diff
+      to support mounting ext4 formatted images read-only
+    - changeset_f79e853d9ee8a15b1d16cdc7dfbe85eca50efc6d.diff
+      to utilize mount option MS_NODEV for images
+      (fixes potential security implications)
+    - changeset_d835fa1d20efc4aaacca4be68431d193d6625bd8.diff
+      to fix bootstrapping ran as root (thus no MS_NODEV restriction
+      from above patch should be applied)
+    - changeset_3a2b6537f0b1386336e29d7f763ae62374a7cb77.diff
+      exit with error if snprintf would have went out of bounds
+    - changeset_acc02b921192e7e16afe1513d5338904f8e6f907.diff
+      changeset_0935d68145ce575444b7ced43417cc6fccffd670.diff
+      changeset_0d04edaeb5cb3607ab25588f4db177c0878adcc0.diff
+      Various obvious fixes (updated URLs, apt --force-yes)
+
+ -- Yaroslav Halchenko <debian@onerussian.com>  Thu, 09 Feb 2017 16:27:55 -0500
+
 singularity-container (2.2-1~bpo8+1) jessie-backports; urgency=medium
 
   * Rebuild for jessie-backports.

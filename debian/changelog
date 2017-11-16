@@ -1,3 +1,9 @@
+singularity-container (2.4-1~bpo8+1scibian0) calibre9; urgency=medium
+
+  * Adopt calibre9 naming scheme
+
+ -- Thomas Hamel <thomas-externe.hamel@edf.fr>  Thu, 16 Nov 2017 17:40:00 -0100
+
 singularity-container (2.4-1~bpo8+1) jessie-backports; urgency=medium
 
   * Rebuild for jessie-backports. 

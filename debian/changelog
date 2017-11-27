@@ -1,3 +1,9 @@
+singularity-container (2.4.1-1~bpo8+1scibian0) calibre9; urgency=medium
+
+  * Imported Upstream version 2.4.1
+
+ -- Thomas Hamel <thomas-externe.hamel@edf.fr>  Mon, 27 Nov 2017 17:41:57 +0100
+
 singularity-container (2.4-1~bpo8+1scibian0) calibre9; urgency=medium
 
   * Adopt calibre9 naming scheme
